@@ -176,7 +176,6 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
 
         matches.append({
             "filename": filename,
-            "checksum": it.get("checksum"),
             "index": it.get("index"),
             "char_start": char_start,
             "char_end": char_end,
@@ -218,7 +217,7 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
 
     return {
         "question": question,
-        "answer": answer["content"] if isinstance(answer, dict) and "content" in answer else answer,
+        "answer": answer,
         "matches": matches,
     }
 

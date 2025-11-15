@@ -85,7 +85,6 @@ def qa_page():
                 else:
                     for m in matches:
                         st.markdown(f"**File:** {m.get('filename')}  ")
-                        st.markdown(f"**Checksum:** {m.get('checksum')}  ")
                         st.markdown(f"**Chunk index:** {m.get('index')} (chars {m.get('char_start')} - {m.get('char_end')})  ")
                         st.markdown(f"**Score:** {m.get('score'):.4f}  ")
                         st.write(m.get('snippet'))

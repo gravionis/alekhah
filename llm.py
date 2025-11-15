@@ -17,8 +17,6 @@ class LLMClient:
         self._client = None
         if self.use_google:
             try:
-                print("here.................")
-                # Lazy instantiate client; keep simple configuration
                 self._client = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", api_key=self.api_key)
             except Exception:
                 self._client = None
@@ -27,46 +25,8 @@ class LLMClient:
     def summarize(self, text: str, question: str | None = None, max_chars: int = 1000) -> str:
         """Return a concise summary of `text`. Uses Google LLM if available, else deterministic fallback."""
         prompt = f"Summarize the following search snippets{(' for question: ' + question) if question else ''} into a concise paragraph (max {max_chars} characters):\n\n{text}"
-        print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>",prompt)
-        # Try Google LLM if configured
-        if self.use_google and self._client is not None:
-            try:
-                resp = self._client.invoke(prompt)
-                print("<<<<<<<<<<<<<<<<<<<<<<<<<<<", resp)
-                # coerce to string safely
-                if isinstance(resp, str):
-                    summary = resp.strip()
-                else:
-                    summary = str(resp).strip()
-            except Exception:
-                summary = ""
-        else:
-            summary = ""
-
-        # Deterministic fallback if LLM failed or not configured
-        if not summary:
-            if not text:
-                summary = ""
-            else:
-                if len(text) <= max_chars:
-                    summary = text
-                else:
-                    import re
-                    sentences = re.split(r'(?<=[.!?])\s+', text)
-                    out = []
-                    total = 0
-                    for sent in sentences:
-                        if total + len(sent) > max_chars:
-                            break
-                        out.append(sent)
-                        total += len(sent) + 1
-                    if out:
-                        summary = " ".join(out)
-                    else:
-                        summary = text[:max_chars].rsplit(" ", 1)[0] + "..."
-        # final safety trim
-        if len(summary) > max_chars:
-            summary = summary[:max_chars].rsplit(" ", 1)[0] + "..."
+        resp = self._client.invoke(prompt)
+        summary = resp.content
         return summary
 
 def get_llm(api_key: str | None = None) -> LLMClient:
