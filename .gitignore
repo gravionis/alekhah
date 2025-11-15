@@ -1,0 +1,104 @@
+# ======================================
+# Python / Streamlit / PyCharm / uv
+# ======================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+.uv/
+.venv.*/          # uv-managed environments
+*.eggs/
+*.egg-info/
+dist/
+build/
+
+# Byte-compiled / cache
+.pytest_cache/
+.cache/
+.mypy_cache/
+.hypothesis/
+
+# Logs
+*.log
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+.streamlit/*.json
+.streamlit/*.lock
+.streamlit/*.state
+
+# Streamlit cached files
+**/.streamlit/cache/
+**/.streamlit/.cache/
+**/.streamlit/*.pickle
+
+# --- Environment / Secrets ---
+.env
+.env.*
+*.env
+secrets/
+credentials/
+*.pem
+*.key
+
+# --- uv package manager ---
+.uv/
+.uv_cache/
+uv.lock        # if not needed to be versioned
+.uv.lock       # older uv versions
+
+# --- PyCharm / JetBrains ---
+# Ignore PyCharm project folder
+.idea/
+*.iml
+
+# JetBrains cache / workspace files
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/dictionaries
+.idea/**/shelf/
+.idea/modules.xml
+.idea/dbnavigator.xml
+
+# Misc JetBrains files
+*.iws
+
+# --- Project-specific folders ---
+data/
+data/*
+
+# --- OS Generated files ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Other tools ---
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Jupyter Notebooks (if any) ---
+.ipynb_checkpoints/
+
+# --- Node / Frontend (if present) ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
