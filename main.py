@@ -170,7 +170,7 @@ def qa_page():
                     highlight.set_colors(stroke=[1, 1, 0])  # Yellow highlight
                     highlight.update()
 
-            pix = page.get_pixmap()
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.75, 1.75))
 
             # Convert pixmap to PIL Image
             img_data = pix.tobytes("png")

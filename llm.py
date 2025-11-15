@@ -24,7 +24,8 @@ class LLMClient:
 
     def summarize(self, text: str, question: str | None = None, max_chars: int = 1000) -> str:
         """Return a concise summary of `text`. Uses Google LLM if available, else deterministic fallback."""
-        prompt = f"Summarize the following search snippets{(' for question: ' + question) if question else ''} into a concise paragraph (max {max_chars} characters):\n\n{text}"
+        prompt = f"""Summarize the following search into a professional and complete answer. Answer directly to the question, dont say things like Based on provided text snippets etc.
+                    {(' for question: ' + question) if question else ''} into a concise paragraph (max {max_chars} characters):\n\n{text}"""
         resp = self._client.invoke(prompt)
         summary = resp.content
         return summary
