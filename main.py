@@ -1,6 +1,8 @@
 import streamlit as st
 from typing import List
 import os
+import pandas as pd  # Add this import for table display
+import fitz  # PyMuPDF for PDF handling
 
 from ingestion import list_documents, ingest_files
 from qa import answer_question
@@ -60,6 +62,7 @@ def qa_page():
     question = st.text_area("Question", height=120)
     k = st.number_input("Top k matches", min_value=1, max_value=20, value=3, step=1)
     col1, col2 = st.columns([1, 1])
+
     with col1:
         if st.button("Search"):
             if not question or not question.strip():
@@ -83,15 +86,53 @@ def qa_page():
                 if not matches:
                     st.info("No matching chunks found.")
                 else:
-                    for m in matches:
-                        st.markdown(f"**File:** {m.get('filename')}  ")
-                        st.markdown(f"**Chunk index:** {m.get('index')} (chars {m.get('char_start')} - {m.get('char_end')})  ")
-                        st.markdown(f"**Score:** {m.get('score'):.4f}  ")
-                        st.write(m.get('snippet'))
-                        st.markdown("---")
+                    for match in matches:
+                        filename = match.get("filename")
+                        snippet = match.get("truncated_snippet")
+                        char_start = match.get("char_start")
+                        char_end = match.get("char_end")
+
+                        # Create a clickable link for each filename
+                        link = f"?file={filename}&start={char_start}&end={char_end}"
+                        st.markdown(
+                            f"[**{filename}**]({link}) - {snippet}",
+                            unsafe_allow_html=True,
+                        )
 
     with col2:
-        st.write("Use the left pane to enter a question and run retrieval.")
+        # Display the PDF preview if a file is selected
+        query_params = st.query_params
+        selected_file = query_params.get("file", [None])[0]
+        char_start = int(query_params.get("start", [0])[0])
+        char_end = int(query_params.get("end", [0])[0])
+
+        if selected_file:
+            st.subheader(f"Preview: {selected_file}")
+            try:
+                file_path = os.path.join(ST_KNOWLEDGE_DIR, selected_file)
+                with fitz.open(file_path) as pdf:
+                    # Find the page containing the snippet
+                    snippet_page = None
+                    for page_num in range(len(pdf)):
+                        page = pdf[page_num]
+                        text = page.get_text("text")
+                        if text and str(char_start) in text:
+                            snippet_page = page_num
+                            break
+
+                    if snippet_page is not None:
+                        page = pdf[snippet_page]
+                        # Render the page as an image
+                        pix = page.get_pixmap()
+                        st.image(
+                            pix.tobytes(),
+                            caption=f"Page {snippet_page + 1}",
+                            use_column_width=True,
+                        )
+                    else:
+                        st.info("Snippet not found in the document.")
+            except Exception as e:
+                st.error(f"Error loading PDF: {e}")
 
 
 def rule_gen_page():

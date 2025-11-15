@@ -163,6 +163,10 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
         filename = it.get("filename")
         char_start = it.get("char_start", "")
         char_end = it.get("char_end", "")
+        snippet = it.get("snippet", "")
+
+        # Truncate snippet to 75 characters
+        truncated_snippet = snippet[:75] + "..." if len(snippet) > 75 else snippet
 
         # build link: prefer file:// to originals if exists, else relative path
         if filename:
@@ -179,7 +183,8 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
             "index": it.get("index"),
             "char_start": char_start,
             "char_end": char_end,
-            "snippet": it.get("snippet"),
+            "snippet": snippet,
+            "truncated_snippet": truncated_snippet,
             "score": float(score),
             "link": link,
         })

@@ -10,4 +10,7 @@ dependencies = [
     "langchain-google-genai>=3.0.3",
     "python-dotenv>=1.2.1",
     "typing-extensions>=4.15.0",
+    "fitz>=0.0.1.dev2",
+    "frontend>=0.0.3",
+    "tools>=1.0.10",
 ]
