@@ -1,12 +1,13 @@
 import streamlit as st
 from typing import List
 import os
-import pandas as pd  # Add this import for table display
+import pandas as pd
 import fitz  # PyMuPDF for PDF handling
+from PIL import Image
+import io
 
 from ingestion import list_documents, ingest_files
 from qa import answer_question
-
 
 ST_KNOWLEDGE_DIR = "data/knowledge"
 
@@ -63,7 +64,14 @@ def qa_page():
     k = st.number_input("Top k matches", min_value=1, max_value=20, value=3, step=1)
     col1, col2 = st.columns([1, 1])
 
+    # Initialize selected file in session state
+    if "selected_pdf" not in st.session_state:
+        st.session_state.selected_pdf = "c628_2007.pdf"
+    if "pdf_page" not in st.session_state:
+        st.session_state.pdf_page = 0
+
     with col1:
+        # Store search results in session state to persist them
         if st.button("Search"):
             if not question or not question.strip():
                 st.warning("Please enter a question")
@@ -71,68 +79,86 @@ def qa_page():
                 with st.spinner("Searching..."):
                     try:
                         result = answer_question(question, k=int(k))
+                        st.session_state.search_result = result
                     except Exception as e:
                         st.error(f"Error during search: {e}")
                         return
 
-                st.subheader("Answer")
-                if result.get("answer"):
-                    st.write(result.get("answer"))
-                else:
-                    st.info("No answer could be composed from the ingested content.")
+        # Display search results if they exist
+        if "search_result" in st.session_state:
+            result = st.session_state.search_result
 
-                st.subheader("Sources")
-                matches = result.get("matches") or []
-                if not matches:
-                    st.info("No matching chunks found.")
-                else:
-                    for match in matches:
-                        filename = match.get("filename")
-                        snippet = match.get("truncated_snippet")
-                        char_start = match.get("char_start")
-                        char_end = match.get("char_end")
+            st.subheader("Answer")
+            if result.get("answer"):
+                st.write(result.get("answer"))
+            else:
+                st.info("No answer could be composed from the ingested content.")
 
-                        # Create a clickable link for each filename
-                        link = f"?file={filename}&start={char_start}&end={char_end}"
-                        st.markdown(
-                            f"[**{filename}**]({link}) - {snippet}",
-                            unsafe_allow_html=True,
-                        )
+            st.subheader("Sources")
+            matches = result.get("matches") or []
+            if not matches:
+                st.info("No matching chunks found.")
+            else:
+                for match in matches:
+                    filename = match.get("filename")
+                    snippet = match.get("truncated_snippet")
+                    char_start = match.get("char_start")
+                    char_end = match.get("char_end")
+
+                    # Create a clickable button for each filename
+                    if st.button(f"📄 {filename}", key=f"pdf_{filename}_{char_start}"):
+                        st.session_state.selected_pdf = filename
+                        st.session_state.pdf_page = 0
+
+                    st.write(f"_{snippet}_")
+                    st.divider()
 
     with col2:
-        # Display the PDF preview if a file is selected
-        query_params = st.query_params
-        selected_file = query_params.get("file", [None])[0]
-        char_start = int(query_params.get("start", [0])[0])
-        char_end = int(query_params.get("end", [0])[0])
+        # Display the selected PDF
+        selected_file = st.session_state.selected_pdf
+        st.subheader(f"Preview: {selected_file}")
+        try:
+            file_path = os.path.join(ST_KNOWLEDGE_DIR, selected_file)
 
-        if selected_file:
-            st.subheader(f"Preview: {selected_file}")
-            try:
-                file_path = os.path.join(ST_KNOWLEDGE_DIR, selected_file)
-                with fitz.open(file_path) as pdf:
-                    # Find the page containing the snippet
-                    snippet_page = None
-                    for page_num in range(len(pdf)):
-                        page = pdf[page_num]
-                        text = page.get_text("text")
-                        if text and str(char_start) in text:
-                            snippet_page = page_num
-                            break
+            if not os.path.exists(file_path):
+                st.warning(f"File not found: {selected_file}")
+                return
 
-                    if snippet_page is not None:
-                        page = pdf[snippet_page]
-                        # Render the page as an image
-                        pix = page.get_pixmap()
-                        st.image(
-                            pix.tobytes(),
-                            caption=f"Page {snippet_page + 1}",
-                            use_column_width=True,
-                        )
-                    else:
-                        st.info("Snippet not found in the document.")
-            except Exception as e:
-                st.error(f"Error loading PDF: {e}")
+            pdf = fitz.Document(file_path)
+            total_pages = len(pdf)
+
+            # Navigation buttons
+            col_prev, col_info, col_next = st.columns([1, 2, 1])
+
+            with col_prev:
+                if st.button("← Previous", disabled=(st.session_state.pdf_page == 0)):
+                    st.session_state.pdf_page -= 1
+                    st.rerun()
+
+            with col_info:
+                st.write(f"Page {st.session_state.pdf_page + 1} of {total_pages}")
+
+            with col_next:
+                if st.button("Next →", disabled=(st.session_state.pdf_page >= total_pages - 1)):
+                    st.session_state.pdf_page += 1
+                    st.rerun()
+
+            # Render current page
+            page = pdf[st.session_state.pdf_page]
+            pix = page.get_pixmap()
+
+            # Convert pixmap to PIL Image
+            img_data = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_data))
+
+            st.image(
+                img,
+                use_column_width=True,
+            )
+
+            pdf.close()
+        except Exception as e:
+            st.error(f"Error loading PDF: {e}")
 
 
 def rule_gen_page():
