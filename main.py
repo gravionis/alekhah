@@ -109,6 +109,9 @@ def qa_page():
                     if st.button(f"📄 {filename}", key=f"pdf_{filename}_{char_start}"):
                         st.session_state.selected_pdf = filename
                         st.session_state.pdf_page = 0
+                        st.session_state.highlight_text = match.get("snippet", "")
+                        st.session_state.char_start = char_start
+                        st.session_state.char_end = char_end
 
                     st.write(f"_{snippet}_")
                     st.divider()
@@ -127,11 +130,23 @@ def qa_page():
             pdf = fitz.Document(file_path)
             total_pages = len(pdf)
 
+            # Find the page containing the highlight text (only on first load)
+            if "highlight_text" in st.session_state and st.session_state.highlight_text:
+                if "last_highlight" not in st.session_state or st.session_state.last_highlight != st.session_state.highlight_text:
+                    search_text = st.session_state.highlight_text
+                    for page_num in range(total_pages):
+                        page = pdf[page_num]
+                        text_instances = page.search_for(search_text[:100])  # Search first 100 chars
+                        if text_instances:
+                            st.session_state.pdf_page = page_num
+                            st.session_state.last_highlight = st.session_state.highlight_text
+                            break
+
             # Navigation buttons
             col_prev, col_info, col_next = st.columns([1, 2, 1])
 
             with col_prev:
-                if st.button("← Previous", disabled=(st.session_state.pdf_page == 0)):
+                if st.button("←", disabled=(st.session_state.pdf_page == 0)):
                     st.session_state.pdf_page -= 1
                     st.rerun()
 
@@ -139,12 +154,22 @@ def qa_page():
                 st.write(f"Page {st.session_state.pdf_page + 1} of {total_pages}")
 
             with col_next:
-                if st.button("Next →", disabled=(st.session_state.pdf_page >= total_pages - 1)):
+                if st.button("→", disabled=(st.session_state.pdf_page >= total_pages - 1)):
                     st.session_state.pdf_page += 1
                     st.rerun()
 
-            # Render current page
+            # Render current page with highlights
             page = pdf[st.session_state.pdf_page]
+
+            # Highlight the search text if it exists on this page
+            if "highlight_text" in st.session_state and st.session_state.highlight_text:
+                search_text = st.session_state.highlight_text
+                text_instances = page.search_for(search_text[:100])
+                for inst in text_instances:
+                    highlight = page.add_highlight_annot(inst)
+                    highlight.set_colors(stroke=[1, 1, 0])  # Yellow highlight
+                    highlight.update()
+
             pix = page.get_pixmap()
 
             # Convert pixmap to PIL Image
@@ -152,8 +177,7 @@ def qa_page():
             img = Image.open(io.BytesIO(img_data))
 
             st.image(
-                img,
-                use_column_width=True,
+                img
             )
 
             pdf.close()
