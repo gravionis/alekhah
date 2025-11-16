@@ -1,20 +1,16 @@
 """qa.py
 
-Simple question-answering over the ingested vector JSON files produced by
-`ingestion.py` (Phase 1). This module loads JSON files from `data/vectors/`,
-computes a deterministic query embedding using `ingestion.embed_stub`, performs
-cosine-similarity search against stored chunk embeddings, and returns the top-k
-matching chunks along with a short aggregated answer composed from snippets.
+Question-answering over the ingested vector JSON files produced by
+`ingestion.py`. This module loads JSON files from `data/vectors/`,
+computes query embeddings using the same HuggingFace model (via LangChain),
+performs cosine-similarity search against stored chunk embeddings, and returns
+the top-k matching chunks along with a short aggregated answer composed from snippets.
 
 API:
 - answer_question(question: str, k: int = 3) -> dict
 
 CLI:
 - python qa.py "your question" --k 3
-
-This file is intentionally lightweight and has no external ML/embedding
-dependencies; it uses the deterministic `embed_stub` from `ingestion.py` so it
-works in Phase 1.
 """
 
 import os
@@ -25,9 +21,9 @@ import argparse
 import logging
 from typing import List, Dict, Any, Optional
 
-# local import from same package
-from ingestion import embed_stub
-import llm  # new: use llm.get_llm()
+# local imports
+from ingestion import get_embeddings_model
+import llm  # use llm.get_llm()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -105,7 +101,13 @@ def _cosine(a: List[float], b: List[float]) -> float:
     return dot / (math.sqrt(na) * math.sqrt(nb))
 
 
-def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, max_answer_chars: int = 10000) -> Dict[str, Any]:
+def answer_question(
+    question: str,
+    k: int = 3,
+    vectors_dir: str = VECTORS_DIR,
+    max_answer_chars: int = 10000,
+    embeddings_model_name: str = "sentence-transformers/all-mpnet-base-v2"
+) -> Dict[str, Any]:
     """Return an answer and the top-k matching chunks for `question`.
 
     Output format:
@@ -115,8 +117,8 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
         "matches": [ { filename, checksum, index, char_start, char_end, snippet, score } ]
       }
 
-    The `answer` is a simple concatenation of top snippets (trimmed to
-    `max_answer_chars`). This is intentionally simple for Phase 1.
+    Uses HuggingFace embeddings via LangChain to compute query embedding and match
+    against stored chunk embeddings.
     """
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be a non-empty string")
@@ -127,14 +129,24 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
     if not items:
         return {"question": question, "answer": "", "matches": []}
 
-    # compute query embedding
-    q_emb = embed_stub(question)
+    # Get embeddings model (same as used during ingestion)
+    embeddings_model = get_embeddings_model(embeddings_model_name)
+
+    # Compute query embedding using LangChain's embed_query method
+    q_emb = embeddings_model.embed_query(question)
     emb_dim = len(q_emb)
 
     # verify dims
     for it in items[:5]:
         if len(it["embedding"]) != emb_dim:
-            raise ValueError("embedding dimension mismatch between query and stored vectors")
+            logger.warning(
+                "embedding dimension mismatch: query=%d, stored=%d. "
+                "Make sure you're using the same model for ingestion and querying.",
+                emb_dim, len(it["embedding"])
+            )
+            raise ValueError(
+                f"embedding dimension mismatch between query ({emb_dim}) and stored vectors ({len(it['embedding'])})"
+            )
 
     # compute top-k via heap
     heap: List[tuple] = []  # min-heap of (score, idx)
@@ -155,8 +167,8 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
     matches = []
     snippets = []
 
-    # prefer linking to data/originals if present
-    originals_dir = os.path.abspath(os.path.join("data", "originals"))
+    # prefer linking to data/knowledge if present
+    knowledge_dir = os.path.abspath(os.path.join("data", "knowledge"))
 
     for score, idx in top:
         it = items[idx]
@@ -166,11 +178,11 @@ def answer_question(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, m
         snippet = it.get("snippet", "")
 
         # Truncate snippet to 75 characters
-        truncated_snippet = snippet[:75] + "..." if len(snippet) > 75 else snippet
+        truncated_snippet = snippet
 
-        # build link: prefer file:// to originals if exists, else relative path
+        # build link: prefer file:// to knowledge if exists, else relative path
         if filename:
-            candidate = os.path.join(originals_dir, filename)
+            candidate = os.path.join(knowledge_dir, filename)
             if os.path.exists(candidate):
                 link = f"file://{candidate}#chars={char_start}-{char_end}"
             else:
@@ -243,16 +255,16 @@ def summarize_matches(matches: List[Dict[str, Any]], question: Optional[str] = N
     table_lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
 
     snippets: List[str] = []
-    # attempt to link to a likely originals directory; fallback to relative filename
-    originals_dir = os.path.abspath(os.path.join("data", "originals"))
+    # attempt to link to knowledge directory
+    knowledge_dir = os.path.abspath(os.path.join("data", "knowledge"))
 
     for m in matches:
         filename = m.get("filename") or ""
         char_start = m.get("char_start", "")
         char_end = m.get("char_end", "")
-        # prefer linking to data/originals if that file exists; otherwise link to relative filename
+        # prefer linking to data/knowledge if that file exists; otherwise link to relative filename
         if filename:
-            candidate = os.path.join(originals_dir, filename)
+            candidate = os.path.join(knowledge_dir, filename)
             if os.path.exists(candidate):
                 # include char fragment to help the user locate the snippet
                 link = f"file://{candidate}#chars={char_start}-{char_end}"
@@ -297,9 +309,22 @@ def summarize_matches(matches: List[Dict[str, Any]], question: Optional[str] = N
     return {"summary": summary, "references_table": references_table}
 
 
-def answer_and_summarize(question: str, k: int = 3, vectors_dir: str = VECTORS_DIR, max_answer_chars: int = 1000, summary_chars: int = 1000) -> Dict[str, Any]:
+def answer_and_summarize(
+    question: str,
+    k: int = 3,
+    vectors_dir: str = VECTORS_DIR,
+    max_answer_chars: int = 1000,
+    summary_chars: int = 1000,
+    embeddings_model_name: str = "sentence-transformers/all-mpnet-base-v2"
+) -> Dict[str, Any]:
     """Run the vector search and produce both the simple answer and a summarized view with references."""
-    out = answer_question(question, k=k, vectors_dir=vectors_dir, max_answer_chars=max_answer_chars)
+    out = answer_question(
+        question,
+        k=k,
+        vectors_dir=vectors_dir,
+        max_answer_chars=max_answer_chars,
+        embeddings_model_name=embeddings_model_name
+    )
     summ = summarize_matches(out.get("matches", []), question=question, max_chars=summary_chars)
     out["summary"] = summ["summary"]
     out["references_table"] = summ["references_table"]
@@ -307,18 +332,33 @@ def answer_and_summarize(question: str, k: int = 3, vectors_dir: str = VECTORS_D
 
 
 def _main():
-    p = argparse.ArgumentParser(description="Ask a question against ingested vectors (Phase 1: JSON fallback)")
+    p = argparse.ArgumentParser(description="Ask a question against ingested vectors using HuggingFace embeddings")
     p.add_argument("question", nargs="+", help="Question to ask")
     p.add_argument("--k", type=int, default=3, help="Number of top matches to return")
     p.add_argument("--vectors-dir", default=VECTORS_DIR, help="Directory where vector JSON files are stored")
     p.add_argument("--summarize", action="store_true", help="Also produce a summary and reference table from top matches")
+    p.add_argument(
+        "--model",
+        default="sentence-transformers/all-mpnet-base-v2",
+        help="Embeddings model name (must match the one used during ingestion)"
+    )
     args = p.parse_args()
     question = " ".join(args.question)
     try:
         if args.summarize:
-            out = answer_and_summarize(question, k=args.k, vectors_dir=args.vectors_dir)
+            out = answer_and_summarize(
+                question,
+                k=args.k,
+                vectors_dir=args.vectors_dir,
+                embeddings_model_name=args.model
+            )
         else:
-            out = answer_question(question, k=args.k, vectors_dir=args.vectors_dir)
+            out = answer_question(
+                question,
+                k=args.k,
+                vectors_dir=args.vectors_dir,
+                embeddings_model_name=args.model
+            )
     except Exception as e:
         logger.error("error answering question: %s", e)
         raise

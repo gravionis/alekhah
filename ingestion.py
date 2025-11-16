@@ -1,13 +1,12 @@
 """ingestion.py
 
 Utility functions for listing documents, extracting text, chunking, and a simple
-ingest pipeline. Phase 1 implementation stores chunk + metadata + deterministic
-pseudo-embeddings to JSON files under `data/vectors/` as a fallback when a
-pgvector DB is not configured.
+ingest pipeline. Now uses sentence-transformers for real embeddings via LangChain's
+HuggingFaceEmbeddings wrapper. Stores chunk + metadata + embeddings to JSON files
+under `data/vectors/`.
 
-This file intentionally keeps dependencies small: it uses PyPDF2 for PDF text
-extraction. Embedding generation is a deterministic stub so the pipeline can be
-tested without external model dependencies.
+This file uses LangChain's RecursiveCharacterTextSplitter for intelligent text
+chunking and PyPDF2 for PDF text extraction.
 """
 
 import os
@@ -15,11 +14,9 @@ import hashlib
 import json
 import time
 from typing import List, Dict
-
-try:
-    from PyPDF2 import PdfReader
-except Exception:
-    PdfReader = None
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from PyPDF2 import PdfReader
 
 
 def ensure_dir(path: str):
@@ -42,8 +39,6 @@ def compute_checksum(path: str) -> str:
 
 
 def read_pdf_text(path: str) -> str:
-    if PdfReader is None:
-        raise RuntimeError("PyPDF2 is not installed; cannot read PDFs")
     reader = PdfReader(path)
     pages = []
     for p in reader.pages:
@@ -73,56 +68,74 @@ def normalize_text(text: str) -> str:
 
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[Dict]:
-    """Chunk by characters. Returns list of dicts with text, start, end, index."""
+    """Chunk text using LangChain's RecursiveCharacterTextSplitter.
+
+    Returns list of dicts with text, start, end, index.
+    """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be > 0")
     if overlap < 0:
         overlap = 0
 
+    # Use LangChain's intelligent text splitter
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        length_function=len,
+        is_separator_regex=False,
+    )
+
+    # Split the text
+    split_texts = text_splitter.split_text(text)
+
+    # Build chunks with metadata
     chunks = []
-    start = 0
-    text_len = len(text)
-    index = 0
-    while start < text_len:
-        end = start + chunk_size
-        chunk_text = text[start:end]
+    current_pos = 0
+    for index, chunk_text in enumerate(split_texts):
+        # Find the actual position of this chunk in the original text
+        start = text.find(chunk_text, current_pos)
+        if start == -1:
+            # Fallback if exact match not found (shouldn't happen normally)
+            start = current_pos
+        end = start + len(chunk_text)
+
         chunks.append({
             "index": index,
             "text": chunk_text,
             "char_start": start,
-            "char_end": min(end, text_len),
+            "char_end": end,
         })
-        index += 1
-        start = end - overlap
-        if start < 0:
-            start = 0
+        current_pos = end
+
     return chunks
 
 
-def embed_stub(text: str, dim: int = 32) -> List[float]:
-    """Deterministic pseudo-embedding: derived from sha256 hash of text.
+def get_embeddings_model(model_name: str = "sentence-transformers/all-mpnet-base-v2"):
+    """Get HuggingFace embeddings model via LangChain wrapper.
 
-    - Uses a small dimension by default so storage is compact for testing.
-    - Values are floats in range [-1, 1].
+    Default model: all-mpnet-base-v2 (most accurate sentence-transformers model)
+    Alternative: sentence-transformers/all-MiniLM-L6-v2 (faster, smaller)
     """
-    h = hashlib.sha256(text.encode("utf-8")).digest()
-    # Expand or repeat digest to reach required bytes
-    needed = dim * 4
-    data = (h * ((needed // len(h)) + 1))[:needed]
-    vals = []
-    for i in range(0, needed, 4):
-        chunk = data[i : i + 4]
-        val = int.from_bytes(chunk, "big", signed=False)
-        # normalize to [-1, 1]
-        vals.append((val / (2 ** 32 - 1)) * 2 - 1)
-    return vals
+    return HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={'device': 'cpu'},  # Use 'cuda' if GPU available
+        encode_kwargs={'normalize_embeddings': True}  # Normalize for cosine similarity
+    )
 
 
-def ingest_file(filename: str, knowledge_dir: str = "knowledge", chunk_size: int = 1000, overlap: int = 200, out_dir: str = "data/vectors") -> Dict:
+def ingest_file(
+    filename: str,
+    knowledge_dir: str = "data/knowledge",
+    chunk_size: int = 1000,
+    overlap: int = 200,
+    out_dir: str = "data/vectors",
+    embeddings_model_name: str = "sentence-transformers/all-mpnet-base-v2"
+) -> Dict:
     """Ingest a single file. Returns status dict with counts and output path.
 
-    Behavior: parses .md/.pdf, normalizes, chunks, generates pseudo-embeddings, and
-    writes a JSON file with chunks & metadata to `out_dir/{filename}.{checksum}.json`.
+    Behavior: parses .md/.pdf, normalizes, chunks using LangChain's text splitter,
+    generates embeddings using HuggingFace models, and writes a JSON file with
+    chunks & metadata to `out_dir/{filename}.{checksum}.json`.
     """
     ensure_dir(knowledge_dir)
     ensure_dir(out_dir)
@@ -131,6 +144,9 @@ def ingest_file(filename: str, knowledge_dir: str = "knowledge", chunk_size: int
         return {"filename": filename, "status": "missing", "error": "file not found"}
 
     try:
+        # Initialize embeddings model
+        embeddings_model = get_embeddings_model(embeddings_model_name)
+
         checksum = compute_checksum(path)
         ext = filename.lower().rsplit(".", 1)[-1]
         if ext == "pdf":
@@ -145,11 +161,18 @@ def ingest_file(filename: str, knowledge_dir: str = "knowledge", chunk_size: int
 
         text = normalize_text(text)
         chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap)
+
+        # Extract texts for batch embedding
+        chunk_texts = [c["text"] for c in chunks]
+
+        # Generate embeddings in batch (more efficient)
+        embeddings = embeddings_model.embed_documents(chunk_texts)
+
         # enrich each chunk with snippet and embedding
-        for c in chunks:
+        for i, c in enumerate(chunks):
             snippet = c["text"][:400]
             c["snippet"] = snippet
-            c["embedding"] = embed_stub(c["text"])  # small deterministic vector
+            c["embedding"] = embeddings[i]  # Real embedding from sentence-transformers
             # remove full text from chunk payload to keep stored files smaller
             # but keep a snippet and char offsets
             del c["text"]
@@ -160,6 +183,8 @@ def ingest_file(filename: str, knowledge_dir: str = "knowledge", chunk_size: int
             "ingest_timestamp": int(time.time()),
             "chunk_size": chunk_size,
             "overlap": overlap,
+            "embedding_model": embeddings_model_name,
+            "embedding_dimension": len(embeddings[0]) if embeddings else 0,
             "chunks": chunks,
         }
         out_path = os.path.join(out_dir, f"{filename}.{checksum}.json")
@@ -171,10 +196,24 @@ def ingest_file(filename: str, knowledge_dir: str = "knowledge", chunk_size: int
         return {"filename": filename, "status": "error", "error": str(e)}
 
 
-def ingest_files(filenames: List[str], knowledge_dir: str = "knowledge", chunk_size: int = 1000, overlap: int = 200, out_dir: str = "data/vectors") -> List[Dict]:
+def ingest_files(
+    filenames: List[str],
+    knowledge_dir: str = "data/knowledge",
+    chunk_size: int = 1000,
+    overlap: int = 200,
+    out_dir: str = "data/vectors",
+    embeddings_model_name: str = "sentence-transformers/all-mpnet-base-v2"
+) -> List[Dict]:
     results = []
     for fn in filenames:
-        res = ingest_file(fn, knowledge_dir=knowledge_dir, chunk_size=chunk_size, overlap=overlap, out_dir=out_dir)
+        res = ingest_file(
+            fn,
+            knowledge_dir=knowledge_dir,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            out_dir=out_dir,
+            embeddings_model_name=embeddings_model_name
+        )
         results.append(res)
     return results
 
@@ -182,4 +221,3 @@ def ingest_files(filenames: List[str], knowledge_dir: str = "knowledge", chunk_s
 if __name__ == "__main__":
     # quick manual smoke test
     print("Listing knowledge docs:", list_documents())
-

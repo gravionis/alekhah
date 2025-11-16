@@ -14,4 +14,6 @@ dependencies = [
     "frontend>=0.0.3",
     "tools>=1.0.10",
     "pymupdf>=1.26.6",
+    "langchain-huggingface>=1.0.1",
+    "sentence-transformers>=5.1.2",
 ]
