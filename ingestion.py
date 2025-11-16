@@ -170,11 +170,9 @@ def ingest_file(
 
         # enrich each chunk with snippet and embedding
         for i, c in enumerate(chunks):
-            snippet = c["text"][:400]
+            snippet = c["text"]
             c["snippet"] = snippet
-            c["embedding"] = embeddings[i]  # Real embedding from sentence-transformers
-            # remove full text from chunk payload to keep stored files smaller
-            # but keep a snippet and char offsets
+            c["embedding"] = embeddings[i]
             del c["text"]
 
         out = {
@@ -199,8 +197,8 @@ def ingest_file(
 def ingest_files(
     filenames: List[str],
     knowledge_dir: str = "data/knowledge",
-    chunk_size: int = 1000,
-    overlap: int = 200,
+    chunk_size: int = 2000,
+    overlap: int = 400,
     out_dir: str = "data/vectors",
     embeddings_model_name: str = "sentence-transformers/all-mpnet-base-v2"
 ) -> List[Dict]:

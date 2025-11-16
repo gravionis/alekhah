@@ -115,7 +115,7 @@ def generate_relevance_reason(question: str, snippet: str) -> str:
         client = llm.get_llm()
         prompt = f"""Given the question: "{question}"
 
-And this text snippet: "{snippet[:500]}..."
+And this text snippet: "{snippet}..."
 
 Explain in 1-2 sentences why this text is relevant to answering the question. Be specific and concise."""
 
