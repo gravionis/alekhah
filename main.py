@@ -58,11 +58,10 @@ def ingestion_page():
 
 def qa_page():
     st.title("Question Answer")
-    st.write("Ask a question against the ingested contents (Phase 1: JSON vector store)")
+    st.write("Shoot:")
 
     question = st.text_area("Question", height=120)
     k = st.number_input("Top k matches", min_value=1, max_value=20, value=3, step=1)
-    col1, col2 = st.columns([1, 1])
 
     # Initialize selected file in session state
     if "selected_pdf" not in st.session_state:
@@ -70,53 +69,86 @@ def qa_page():
     if "pdf_page" not in st.session_state:
         st.session_state.pdf_page = 0
 
-    with col1:
-        # Store search results in session state to persist them
-        if st.button("Search"):
-            if not question or not question.strip():
-                st.warning("Please enter a question")
-            else:
-                with st.spinner("Searching..."):
-                    try:
-                        result = answer_question(question, k=int(k))
-                        st.session_state.search_result = result
-                    except Exception as e:
-                        st.error(f"Error during search: {e}")
-                        return
+    # Store search results in session state to persist them
+    if st.button("Search"):
+        if not question or not question.strip():
+            st.warning("Please enter a question")
+        else:
+            with st.spinner("Searching and analyzing relevance..."):
+                try:
+                    result = answer_question(question, k=int(k), generate_reasons=True)
+                    st.session_state.search_result = result
+                except Exception as e:
+                    st.error(f"Error during search: {e}")
+                    return
 
-        # Display search results if they exist
-        if "search_result" in st.session_state:
-            result = st.session_state.search_result
+    # Display search results if they exist
+    if "search_result" in st.session_state:
+        result = st.session_state.search_result
 
-            st.subheader("Answer")
-            if result.get("answer"):
-                st.write(result.get("answer"))
-            else:
-                st.info("No answer could be composed from the ingested content.")
+        st.subheader("Answer")
+        if result.get("answer"):
+            st.write(result.get("answer"))
+        else:
+            st.info("No answer could be composed from the ingested content.")
 
-            st.subheader("Sources")
-            matches = result.get("matches") or []
-            if not matches:
-                st.info("No matching chunks found.")
-            else:
-                for match in matches:
-                    filename = match.get("filename")
-                    snippet = match.get("truncated_snippet")
-                    char_start = match.get("char_start")
-                    char_end = match.get("char_end")
+        st.subheader("Sources")
+        matches = result.get("matches") or []
+        if not matches:
+            st.info("No matching chunks found.")
+        else:
+            # Create table using columns and containers for better layout
+            # Header row
+            header_cols = st.columns([2, 4, 1, 5])
+            with header_cols[0]:
+                st.markdown("**Filename**")
+            with header_cols[1]:
+                st.markdown("**Text**")
+            with header_cols[2]:
+                st.markdown("**Confidenc**")
+            with header_cols[3]:
+                st.markdown("**Relevance Reason**")
 
-                    # Create a clickable button for each filename
-                    if st.button(f"📄 {filename}", key=f"pdf_{filename}_{char_start}"):
+            st.divider()
+
+            # Data rows
+            for idx, match in enumerate(matches):
+                filename = match.get("filename", "")
+                snippet = match.get("snippet", "")
+                score = match.get("score", 0.0)*100
+                relevance_reason = match.get("relevance_reason", "N/A")
+
+                # Truncate snippet for display
+                display_snippet = snippet[:200] + "..." if len(snippet) > 200 else snippet
+
+                row_cols = st.columns([2, 4, 1, 5])
+
+                with row_cols[0]:
+                    # Clickable filename button
+                    if st.button(f"📄 {filename}", key=f"file_{idx}", width='stretch'):
                         st.session_state.selected_pdf = filename
                         st.session_state.pdf_page = 0
-                        st.session_state.highlight_text = match.get("snippet", "")
-                        st.session_state.char_start = char_start
-                        st.session_state.char_end = char_end
+                        st.session_state.highlight_text = snippet
+                        st.session_state.char_start = match.get("char_start")
+                        st.session_state.char_end = match.get("char_end")
+                        st.rerun()
 
-                    st.write(f"_{snippet}_")
-                    st.divider()
+                with row_cols[1]:
+                    st.markdown(f"<div style='font-size: 13px; line-height: 1.5;'>{display_snippet}</div>",
+                                unsafe_allow_html=True)
 
-    with col2:
+                with row_cols[2]:
+                    st.markdown(f"<div style='font-size: 9px; line-height: 1.5; font-family: monospace;'>{score:.2f}%</div>", unsafe_allow_html=True)
+
+                with row_cols[3]:
+                    st.markdown(
+                        f"<div style='font-size: 13px; font-style: italic; color: #555;'>{relevance_reason}</div>",
+                        unsafe_allow_html=True)
+
+                st.divider()
+
+        st.markdown("---")
+
         # Display the selected PDF
         selected_file = st.session_state.selected_pdf
         st.subheader(f"Preview: {selected_file}")
@@ -176,9 +208,7 @@ def qa_page():
             img_data = pix.tobytes("png")
             img = Image.open(io.BytesIO(img_data))
 
-            st.image(
-                img
-            )
+            st.image(img, width='stretch')
 
             pdf.close()
         except Exception as e:

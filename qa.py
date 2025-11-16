@@ -101,12 +101,40 @@ def _cosine(a: List[float], b: List[float]) -> float:
     return dot / (math.sqrt(na) * math.sqrt(nb))
 
 
+def generate_relevance_reason(question: str, snippet: str) -> str:
+    """Use LLM to generate a concise explanation of why the snippet is relevant to the question.
+
+    Args:
+        question: The user's question
+        snippet: The text snippet to analyze
+
+    Returns:
+        A brief explanation (1-2 sentences) of relevance
+    """
+    try:
+        client = llm.get_llm()
+        prompt = f"""Given the question: "{question}"
+
+And this text snippet: "{snippet[:500]}..."
+
+Explain in 1-2 sentences why this text is relevant to answering the question. Be specific and concise."""
+
+        reason = client.summarize(prompt, max_chars=200)
+        if not reason or not reason.strip():
+            return "Contains relevant information for the query."
+        return reason.strip()
+    except Exception as e:
+        logger.warning(f"Failed to generate relevance reason: {e}")
+        return "Relevant based on semantic similarity."
+
+
 def answer_question(
     question: str,
     k: int = 3,
     vectors_dir: str = VECTORS_DIR,
     max_answer_chars: int = 10000,
-    embeddings_model_name: str = "sentence-transformers/all-mpnet-base-v2"
+    embeddings_model_name: str = "sentence-transformers/all-mpnet-base-v2",
+    generate_reasons: bool = True
 ) -> Dict[str, Any]:
     """Return an answer and the top-k matching chunks for `question`.
 
@@ -114,7 +142,7 @@ def answer_question(
       {
         "question": str,
         "answer": str,
-        "matches": [ { filename, checksum, index, char_start, char_end, snippet, score } ]
+        "matches": [ { filename, checksum, index, char_start, char_end, snippet, score, relevance_reason } ]
       }
 
     Uses HuggingFace embeddings via LangChain to compute query embedding and match
@@ -190,6 +218,11 @@ def answer_question(
         else:
             link = ""
 
+        # Generate relevance reason using LLM
+        relevance_reason = ""
+        if generate_reasons and snippet:
+            relevance_reason = generate_relevance_reason(question, snippet)
+
         matches.append({
             "filename": filename,
             "index": it.get("index"),
@@ -199,6 +232,7 @@ def answer_question(
             "truncated_snippet": truncated_snippet,
             "score": float(score),
             "link": link,
+            "relevance_reason": relevance_reason,
         })
         if it.get("snippet"):
             snippets.append(it.get("snippet"))
