@@ -1,8 +1,6 @@
 import streamlit as st
-from typing import List
 import os
-import pandas as pd
-import fitz  # PyMuPDF for PDF handling
+import fitz
 from PIL import Image
 import io
 
@@ -58,8 +56,6 @@ def ingestion_page():
 
 def qa_page():
     st.title("Question Answer")
-    st.write("Shoot:")
-
     question = st.text_area("Question", height=120)
     k = st.number_input("Top k matches", min_value=1, max_value=20, value=3, step=1)
 
@@ -119,7 +115,7 @@ def qa_page():
                 relevance_reason = match.get("relevance_reason", "N/A")
 
                 # Truncate snippet for display
-                display_snippet = snippet[:200] + "..." if len(snippet) > 200 else snippet
+                display_snippet = snippet[:200] + "........" if len(snippet) > 200 else snippet
 
                 row_cols = st.columns([2, 4, 1, 5])
 
